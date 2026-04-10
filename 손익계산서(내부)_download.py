@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 # =====================================================
-# SAP Y_OKD_27000037 데이터 조회 및 다운로드
-# - 당월 기준으로 자동 조회
-# - ALV 결과를 클립보드로 추출 → 엑셀 파일 저장
+# SAP Y_OKD_27000039 데이터 조회 및 다운로드
+# - IFRS순익계산서(내부용)
+# - 기간 시작/종료기간: 실행 시 입력받아 조회
+# - 기간/연도 /$PPF, /$PFFP: 자동 계산 (고정)
+# - 클립보드로 전체 데이터 추출 → 엑셀 파일 저장
 # =====================================================
 
 import win32com.client          # SAP GUI를 파이썬으로 조작하는 도구
@@ -10,6 +12,7 @@ import pyperclip                # 클립보드 복사/붙여넣기 도구
 import pandas as pd             # 표 데이터를 엑셀로 저장하는 도구
 import time                     # 대기 시간 도구
 import os                       # 폴더/파일 경로 도구
+import io                       # 문자열을 파일처럼 읽는 도구
 from datetime import date       # 오늘 날짜 도구
 from dotenv import load_dotenv  # .env 파일에서 설정 읽는 도구
 
@@ -22,25 +25,25 @@ load_dotenv()
 
 # 회계연도: 오늘 날짜 기준 자동 설정
 TODAY       = date.today()
-FISCAL_YEAR = str(TODAY.year)   # 회계연도 (예: "2026")
+FISCAL_YEAR = str(TODAY.year)        # 당기 회계연도 (예: "2026")
+PRIOR_YEAR  = str(TODAY.year - 1)    # 전기 회계연도 (예: "2025")
 
-# 전기종료기간: 항상 12 고정 (전년도 12월)
-PRIOR_PERIOD = "12"
+# 기간/연도 고정값
+# /$PPF  = 당기 회계연도 + "001"  (예: "2026001")
+# /$PFFP = 전기 회계연도 + "001"  (예: "2025001")
+PPF_VALUE  = FISCAL_YEAR + "001"     # 고정
+PFFP_VALUE = PRIOR_YEAR  + "001"     # 고정
 
-# G/L 계정 범위 (비워두면 전체 계정 조회)
-ACCOUNT_FROM = ""   # 시작 계정코드 (예: "4100000")
-ACCOUNT_TO   = ""   # 종료 계정코드 (예: "4999999")
-
-# 결과 저장 폴더 (파일명은 실행 시 입력받은 종료기간으로 결정)
+# 결과 저장 폴더
 OUTPUT_DIR = "data/output"
 
-# ALV 클립보드 내보내기 후 대기시간(초) — 컴퓨터가 느리면 늘리세요
+# 클립보드 내보내기 후 대기시간(초) — 컴퓨터가 느리면 늘리세요
 CLIPBOARD_WAIT = 3.0
 
 # -------------------------------------------------------
-# .env에서 T코드 읽기
+# T코드
 # -------------------------------------------------------
-SAP_TCODE = os.getenv("SAP_TCODE", "Y_OKD_27000037")
+SAP_TCODE = "Y_OKD_27000039"
 
 
 # -------------------------------------------------------
@@ -69,30 +72,42 @@ def navigate_to_tcode(session):
 # -------------------------------------------------------
 # 조회 조건 입력
 # -------------------------------------------------------
-def input_conditions(session, period):
+def input_conditions(session, period_from, period_to):
     """
     조회 조건 입력
     - 회계연도: 자동 (올해)
+    - 기간 시작: 실행 시 입력받은 값
     - 종료기간: 실행 시 입력받은 값
-    - 전기종료기간: 12 고정
+    - 전기기간시작: 기간 시작과 동일
+    - 전기종료기간: 종료기간과 동일
+    - 기간/연도 /$PPF:  당기연도 + 001 (고정)
+    - 기간/연도 /$PFFP: 전기연도 + 001 (고정)
     """
-    # 회계연도 입력 (예: "2026")
+    # 회계연도 (예: "2026")
     session.findById("wnd[0]/usr/ctxtPAR_01").text = FISCAL_YEAR
 
-    # 종료기간 입력 (실행 시 입력받은 월)
-    session.findById("wnd[0]/usr/ctxtPAR_03").text = period
+    # 기간 시작 (사용자 입력)
+    session.findById("wnd[0]/usr/ctxtPAR_04").text = period_from
 
-    # 전기종료기간 입력 — 항상 12 고정
-    session.findById("wnd[0]/usr/ctxtPAR_02").text = PRIOR_PERIOD
+    # 종료기간 (사용자 입력)
+    session.findById("wnd[0]/usr/ctxtPAR_03").text = period_to
 
-    # G/L 계정 범위 (설정된 경우에만 입력)
-    if ACCOUNT_FROM:
-        session.findById("wnd[0]/usr/ctxtSD_SAKNR-LOW").text  = ACCOUNT_FROM
-    if ACCOUNT_TO:
-        session.findById("wnd[0]/usr/ctxtSD_SAKNR-HIGH").text = ACCOUNT_TO
+    # 전기기간시작 = 기간 시작과 동일
+    session.findById("wnd[0]/usr/ctxtPAR_05").text = period_from
+
+    # 전기종료기간 = 종료기간과 동일
+    session.findById("wnd[0]/usr/ctxtPAR_02").text = period_to
+
+    # 기간/연도 /$PPF: 당기연도 + 001 (고정, 예: 2026001)
+    session.findById("wnd[0]/usr/ctxtPAR_06").text = PPF_VALUE
+
+    # 기간/연도 /$PFFP: 전기연도 + 001 (고정, 예: 2025001)
+    session.findById("wnd[0]/usr/ctxtPAR_07").text = PFFP_VALUE
 
     time.sleep(0.3)
-    print(f"  [조건 입력] 회계연도={FISCAL_YEAR}, 종료기간={period}월, 전기종료기간={PRIOR_PERIOD}")
+    print(f"  [조건 입력] 회계연도={FISCAL_YEAR}, "
+          f"기간시작={period_from}월, 종료기간={period_to}월, "
+          f"/$PPF={PPF_VALUE}, /$PFFP={PFFP_VALUE}")
 
 
 # -------------------------------------------------------
@@ -106,14 +121,12 @@ def execute_report(session):
 
 
 # -------------------------------------------------------
-# 전체 데이터 한 번에 내보내기
-# 시스템(Y) → 리스트(I) → 저장(A) → 로컬 파일(I)
+# 전체 데이터 클립보드로 내보내기
 # -------------------------------------------------------
 def download_all_at_once(session):
     """
     SAP 메뉴 '시스템 → 리스트 → 저장 → 로컬 파일'에서
     클립보드(형식 [4,0]) 로 전체 데이터를 한 번에 추출합니다.
-    파일을 저장하지 않고 메모리(클립보드)에서 바로 읽으므로 빠릅니다.
     """
     # ① 화면 최대화 (전체 데이터가 잘리지 않도록)
     session.findById("wnd[0]").maximize()
@@ -139,7 +152,6 @@ def download_all_at_once(session):
         raise RuntimeError(f"클립보드 형식 선택 실패: {e}")
 
     # ④ 클립보드 내용 읽기
-    #    SAP가 클립보드에 탭 구분 텍스트를 복사해 줌
     time.sleep(CLIPBOARD_WAIT)
     content = pyperclip.paste()
 
@@ -147,41 +159,31 @@ def download_all_at_once(session):
         print("  [주의] 클립보드가 비어있습니다.")
         return pd.DataFrame()
 
-    # ⑤ 탭 구분 텍스트 → DataFrame
-    #    header=None → 제목/메타데이터 행을 컬럼명으로 처리하지 않고 데이터로 보존
-    import io
+    # ⑤ 탭 구분 텍스트 → DataFrame (SAP 원본 형태 그대로 유지)
     df = pd.read_csv(
         io.StringIO(content),
-        sep="\t",       # 탭으로 열 구분
+        sep="\t",
         dtype=str,
-        header=None,    # SAP 원본 형태 그대로 유지
+        header=None,
     )
 
-    # 모든 NaN → 빈 문자열
     df = df.fillna("").astype(str)
-
     print(f"  [내보내기 완료] {len(df):,}행 × {len(df.columns)}열")
     return df
 
 
 # -------------------------------------------------------
-# 컬럼 정리 (A열 삭제 + 빈 컬럼 삭제)
+# 컬럼 정리 (빈 컬럼 삭제)
 # -------------------------------------------------------
 def clean_columns(df):
-    """
-    SAP 스프레드시트 내보내기 시 A열(첫 번째 열)은 항상 비어있으므로 삭제하고,
-    값이 하나도 없는 빈 컬럼도 삭제합니다.
-    """
+    """값이 하나도 없는 빈 컬럼을 삭제합니다."""
     before = len(df.columns)
-
-    # 값이 전혀 없는 컬럼 삭제 (공백·NaN 포함)
     df = df.replace("", pd.NA)
     df = df.dropna(axis=1, how="all")
     df = df.fillna("")
     removed = before - len(df.columns)
     if removed > 0:
         print(f"  [열 정리] 빈 컬럼 {removed}개 삭제")
-
     print(f"  [열 정리 완료] 남은 컬럼 수: {len(df.columns)}개")
     return df
 
@@ -191,22 +193,18 @@ def clean_columns(df):
 # -------------------------------------------------------
 def save_to_excel(df, output_path, sheet_suffix=""):
     """
-    DataFrame을 엑셀 파일로 저장합니다.
-    SAP 수기 다운로드와 동일한 형태로 저장합니다.
-    - 숫자 셀은 실제 숫자로 변환 + 통화 서식 적용 (경고 삼각형 제거)
-    - 헤더 없이, 열 너비만 자동 조정
-    sheet_suffix: 시트명 뒤에 붙을 연월 (예: "2603" → 시트명 "재무(내부)_2603")
+    SAP 수기 다운로드와 동일한 형태로 Excel 저장.
+    숫자 셀은 실제 숫자로 변환 + #,##0 통화 서식 적용.
+    sheet_suffix: 시트명 뒤에 붙을 연월 (예: "2603")
     """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    sheet_name = f"재무(내부)_{sheet_suffix}" if sheet_suffix else "재무(내부)"
+    sheet_name = f"손익(내부)_{sheet_suffix}" if sheet_suffix else "손익(내부)"
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        # index=False: 행 번호 숨김 / header=False: 컬럼명 숨김 (SAP 원본 그대로)
         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
         ws = writer.sheets[sheet_name]
 
-        # 숫자 셀 변환: "137,812,868,632" → 숫자 137812868632 + 통화 서식
-        # (Excel 경고 삼각형 = 숫자가 텍스트로 저장된 경우 발생 → 실제 숫자로 바꿔서 해결)
+        # 숫자 문자열 → 실제 숫자 변환 + 통화 서식 (경고 삼각형 제거)
         for row in ws.iter_rows():
             for cell in row:
                 if not isinstance(cell.value, str):
@@ -215,15 +213,10 @@ def save_to_excel(df, output_path, sheet_suffix=""):
                 if cleaned == "":
                     continue
                 try:
-                    # 소수점이 없으면 정수, 있으면 실수로 변환
-                    if "." in cleaned:
-                        cell.value = float(cleaned)
-                    else:
-                        cell.value = int(cleaned)
-                    # 통화 서식: 1,000 단위 구분 + 소수점 없음 (회계 숫자 표기)
+                    cell.value = float(cleaned) if "." in cleaned else int(cleaned)
                     cell.number_format = "#,##0"
                 except ValueError:
-                    pass  # 숫자가 아닌 텍스트는 그대로 유지
+                    pass
 
         # 열 너비 자동 조정
         for col in ws.columns:
@@ -237,23 +230,38 @@ def save_to_excel(df, output_path, sheet_suffix=""):
 # 메인 실행
 # -------------------------------------------------------
 def main():
-    # ── 종료기간 입력 받기 ──────────────────────────────
     print("=" * 55)
-    print(f"  SAP {SAP_TCODE} - IFRS재무상태표(내부용)")
+    print(f"  SAP {SAP_TCODE} - IFRS순익계산서(내부용)")
     print("=" * 55)
     print()
+
+    # ── 기간 시작/종료 입력 ─────────────────────────────
     while True:
-        period = input("  조회할 종료기간(월)을 입력하세요 (1~12): ").strip()
-        if period.isdigit() and 1 <= int(period) <= 12:
+        period_from = input("  기간 시작(월)을 입력하세요 (1~12): ").strip()
+        if period_from.isdigit() and 1 <= int(period_from) <= 12:
             break
         print("  [오류] 1~12 사이의 숫자를 입력하세요.")
 
-    output_file = os.path.join(OUTPUT_DIR, f"Y_OKD_27000037_{FISCAL_YEAR}년{period}월.xlsx")
+    while True:
+        period_to = input("  종료기간(월)을 입력하세요 (1~12): ").strip()
+        if period_to.isdigit() and 1 <= int(period_to) <= 12:
+            if int(period_to) >= int(period_from):
+                break
+            print(f"  [오류] 종료기간은 기간 시작({period_from})보다 크거나 같아야 합니다.")
+        else:
+            print("  [오류] 1~12 사이의 숫자를 입력하세요.")
+
+    output_file = os.path.join(
+        OUTPUT_DIR,
+        f"Y_OKD_27000039_{FISCAL_YEAR}년{period_from}~{period_to}월.xlsx"
+    )
 
     print()
     print(f"  회계연도    : {FISCAL_YEAR}")
-    print(f"  종료기간    : {period}월")
-    print(f"  전기종료기간: {PRIOR_PERIOD} (고정)")
+    print(f"  기간 시작   : {period_from}월")
+    print(f"  종료기간    : {period_to}월")
+    print(f"  /$PPF       : {PPF_VALUE} (고정)")
+    print(f"  /$PFFP      : {PFFP_VALUE} (고정)")
     print(f"  저장 위치   : {output_file}")
     print()
 
@@ -266,7 +274,7 @@ def main():
     navigate_to_tcode(session)
 
     # 3단계: 조건 입력
-    input_conditions(session, period)
+    input_conditions(session, period_from, period_to)
     print()
 
     # 4단계: 조회 실행 (F8)
@@ -274,7 +282,7 @@ def main():
     execute_report(session)
     print()
 
-    # 5단계: 전체 데이터 한 번에 내보내기
+    # 5단계: 전체 데이터 클립보드로 내보내기
     print("  데이터 추출 중...")
     df = download_all_at_once(session)
     if df.empty:
@@ -282,15 +290,14 @@ def main():
         return
     print()
 
-    # 6단계: 컬럼 정리 (B~U열 + 빈 컬럼 삭제)
+    # 6단계: 빈 컬럼 정리
     print("  컬럼 정리 중...")
     df = clean_columns(df)
     print()
 
     # 7단계: 엑셀 저장
     print("  엑셀 파일 저장 중...")
-    # 시트명: 재무(내부)_YYPP 형식 (예: 2603 = 2026년 3월)
-    sheet_suffix = f"{FISCAL_YEAR[2:]}{period.zfill(2)}"
+    sheet_suffix = f"{FISCAL_YEAR[2:]}{period_to.zfill(2)}"
     save_to_excel(df, output_file, sheet_suffix)
     print()
 
