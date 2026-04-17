@@ -13,12 +13,16 @@
 - 개발 초보자 — 코드 설명 시 회계 업무에 빗대어 설명하면 이해하기 쉬움
 - GitHub 계정: ji0eg / 이메일: ji0eg@gmail.com
 
-## 프로젝트 구조 (2026-03-27 기준)
+## 프로젝트 구조 (2026-04-17 기준)
 - `exchange_rate.py` — 한국은행 API에서 환율 수집 후 엑셀 저장
 - `module1_closing.py` — 월 마감 자동화 (ERP 데이터 검증 + 계정별 집계)
 - `module2_statement.py` — 분기 결산명세서 자동화 (전기 비교표 생성)
 - `module3_footnote_draft.py` — 주석 초안 자동 생성 (워드/엑셀 출력)
 - `module4_footnote_merge.py` — 주석 취합 + 교차 검증
+- `재무상태표(내부)_download.py` — SAP Y_OKD_27000037 IFRS재무상태표(내부용) 자동 다운로드
+- `손익계산서(내부)_download.py` — SAP Y_OKD_27000039 IFRS순익계산서(내부용) 자동 다운로드
+- `zsdr0026_download.py` — SAP ZSDR0026 ALV 데이터 추출
+- `y_okd_field_dump.py` — SAP 선택화면 필드 ID 조회 유틸리티
 - `data/input/` — ERP 원시 파일, 팀별 주석 파일 보관
 - `data/output/` — 자동화 결과물 저장
 - `data/templates/` — 주석 워드 템플릿 보관

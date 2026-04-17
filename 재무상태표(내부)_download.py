@@ -2,11 +2,10 @@
 # =====================================================
 # SAP Y_OKD_27000037 데이터 조회 및 다운로드
 # - 당월 기준으로 자동 조회
-# - ALV 결과를 클립보드로 추출 → 엑셀 파일 저장
+# - 스프레드시트([1,0]) XLS로 저장 → 파이썬에서 읽어 엑셀로 저장
 # =====================================================
 
 import win32com.client          # SAP GUI를 파이썬으로 조작하는 도구
-import pyperclip                # 클립보드 복사/붙여넣기 도구
 import pandas as pd             # 표 데이터를 엑셀로 저장하는 도구
 import time                     # 대기 시간 도구
 import os                       # 폴더/파일 경로 도구
@@ -27,20 +26,11 @@ FISCAL_YEAR = str(TODAY.year)   # 회계연도 (예: "2026")
 # 전기종료기간: 항상 12 고정 (전년도 12월)
 PRIOR_PERIOD = "12"
 
-# G/L 계정 범위 (비워두면 전체 계정 조회)
-ACCOUNT_FROM = ""   # 시작 계정코드 (예: "4100000")
-ACCOUNT_TO   = ""   # 종료 계정코드 (예: "4999999")
-
-# 결과 저장 폴더 (파일명은 실행 시 입력받은 종료기간으로 결정)
+# 결과 저장 폴더
 OUTPUT_DIR = "data/output"
 
-# ALV 클립보드 내보내기 후 대기시간(초) — 컴퓨터가 느리면 늘리세요
-CLIPBOARD_WAIT = 3.0
-
-# -------------------------------------------------------
-# .env에서 T코드 읽기
-# -------------------------------------------------------
-SAP_TCODE = os.getenv("SAP_TCODE", "Y_OKD_27000037")
+# T코드
+SAP_TCODE = "Y_OKD_27000037"
 
 
 # -------------------------------------------------------
@@ -76,23 +66,19 @@ def input_conditions(session, period):
     - 종료기간: 실행 시 입력받은 값
     - 전기종료기간: 12 고정
     """
-    # 회계연도 입력 (예: "2026")
-    session.findById("wnd[0]/usr/ctxtPAR_01").text = FISCAL_YEAR
-
-    # 종료기간 입력 (실행 시 입력받은 월)
+    # 종료기간 입력 (실행 시 입력받은 월) — ctxtPAR_03
     session.findById("wnd[0]/usr/ctxtPAR_03").text = period
+    session.findById("wnd[0]/usr/ctxtPAR_03").setFocus()
+    session.findById("wnd[0]/usr/ctxtPAR_03").caretPosition = len(period)
+    session.findById("wnd[0]").sendVKey(0)   # Enter
 
-    # 전기종료기간 입력 — 항상 12 고정
+    # 전기종료기간 입력 — 항상 12 고정 (ctxtPAR_02)
     session.findById("wnd[0]/usr/ctxtPAR_02").text = PRIOR_PERIOD
-
-    # G/L 계정 범위 (설정된 경우에만 입력)
-    if ACCOUNT_FROM:
-        session.findById("wnd[0]/usr/ctxtSD_SAKNR-LOW").text  = ACCOUNT_FROM
-    if ACCOUNT_TO:
-        session.findById("wnd[0]/usr/ctxtSD_SAKNR-HIGH").text = ACCOUNT_TO
+    session.findById("wnd[0]/usr/ctxtPAR_02").caretPosition = len(PRIOR_PERIOD)
+    session.findById("wnd[0]").sendVKey(0)   # Enter
 
     time.sleep(0.3)
-    print(f"  [조건 입력] 회계연도={FISCAL_YEAR}, 종료기간={period}월, 전기종료기간={PRIOR_PERIOD}")
+    print(f"  [조건 입력] 종료기간={period}월, 전기종료기간={PRIOR_PERIOD}")
 
 
 # -------------------------------------------------------
@@ -109,57 +95,66 @@ def execute_report(session):
 # 전체 데이터 한 번에 내보내기
 # 시스템(Y) → 리스트(I) → 저장(A) → 로컬 파일(I)
 # -------------------------------------------------------
-def download_all_at_once(session):
+def download_all_at_once(session, xls_filename):
     """
-    SAP 메뉴 '시스템 → 리스트 → 저장 → 로컬 파일'에서
-    클립보드(형식 [4,0]) 로 전체 데이터를 한 번에 추출합니다.
-    파일을 저장하지 않고 메모리(클립보드)에서 바로 읽으므로 빠릅니다.
+    SAP 녹화 스크립트 기준:
+    스프레드시트([1,0]) 형식으로 XLS 파일 저장 후 파이썬으로 읽어옵니다.
+    SAP 스프레드시트 = UTF-16 LE 인코딩 탭 구분 텍스트 (.XLS 확장자)
     """
-    # ① 화면 최대화 (전체 데이터가 잘리지 않도록)
-    session.findById("wnd[0]").maximize()
-    time.sleep(0.5)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_dir   = os.path.abspath(OUTPUT_DIR)
+    temp_path = os.path.join(out_dir, xls_filename)
 
-    # ② 시스템 → 리스트 → 저장 → 로컬 파일 메뉴 클릭
+    # ① 시스템 → 리스트 → 저장 → 로컬 파일 메뉴 클릭
     print("  [메뉴] 시스템 → 리스트 → 저장 → 로컬 파일 클릭...")
     session.findById("wnd[0]/mbar/menu[6]/menu[5]/menu[2]/menu[2]").select()
     time.sleep(1.0)
 
-    # ③ 형식 선택 팝업: [4,0] 클립보드 선택
+    # ② 형식 선택: [1,0] 스프레드시트
+    radio = session.findById(
+        "wnd[1]/usr/subSUBSCREEN_STEPLOOP:SAPLSPO5:0150"
+        "/sub:SAPLSPO5:0150/radSPOPLI-SELFLAG[1,0]"
+    )
+    radio.select()
+    radio.setFocus()
+    session.findById("wnd[1]/tbar[0]/btn[0]").press()
+    time.sleep(0.8)
+
+    # ③ 파일 경로·이름 입력 후 저장
+    #    ctxtDY_PATH: 저장 폴더 / ctxtDY_FILENAME: 파일명
+    session.findById("wnd[1]/usr/ctxtDY_PATH").text = out_dir + "\\"
+    session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = xls_filename
+    session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len(xls_filename)
+    session.findById("wnd[1]").sendVKey(0)   # Enter — 경로 확정
+    session.findById("wnd[1]/tbar[0]/btn[0]").press()  # 저장(생성) 클릭
+    time.sleep(2.0)
+
+    # 덮어쓰기 확인 팝업 처리 (파일이 이미 있을 때)
     try:
-        radio = session.findById(
-            "wnd[1]/usr/subSUBSCREEN_STEPLOOP:SAPLSPO5:0150"
-            "/sub:SAPLSPO5:0150/radSPOPLI-SELFLAG[4,0]"
-        )
-        radio.select()
-        radio.setFocus()
         session.findById("wnd[1]/tbar[0]/btn[0]").press()
         time.sleep(1.0)
-        print("  [형식 선택] 클립보드 완료")
-    except Exception as e:
-        raise RuntimeError(f"클립보드 형식 선택 실패: {e}")
+    except Exception:
+        pass
 
-    # ④ 클립보드 내용 읽기
-    #    SAP가 클립보드에 탭 구분 텍스트를 복사해 줌
-    time.sleep(CLIPBOARD_WAIT)
-    content = pyperclip.paste()
+    print(f"  [파일 저장] {temp_path}")
 
-    if not content or not content.strip():
-        print("  [주의] 클립보드가 비어있습니다.")
-        return pd.DataFrame()
-
-    # ⑤ 탭 구분 텍스트 → DataFrame
-    #    header=None → 제목/메타데이터 행을 컬럼명으로 처리하지 않고 데이터로 보존
-    import io
+    # ④ XLS 파일 읽기
+    #    SAP 스프레드시트 = UTF-16 LE 탭 구분 텍스트 (실제 Excel 바이너리 아님)
     df = pd.read_csv(
-        io.StringIO(content),
-        sep="\t",       # 탭으로 열 구분
+        temp_path,
+        sep="\t",
+        encoding="utf-16",
         dtype=str,
-        header=None,    # SAP 원본 형태 그대로 유지
+        header=None,    # SAP 원본 형태(제목·메타데이터 포함) 그대로 유지
     )
 
-    # 모든 NaN → 빈 문자열
-    df = df.fillna("").astype(str)
+    # ⑤ 임시 XLS 파일 삭제
+    try:
+        os.remove(temp_path)
+    except Exception:
+        pass
 
+    df = df.fillna("").astype(str)
     print(f"  [내보내기 완료] {len(df):,}행 × {len(df.columns)}열")
     return df
 
@@ -275,8 +270,10 @@ def main():
     print()
 
     # 5단계: 전체 데이터 한 번에 내보내기
+    # 임시 XLS 파일명: 녹화 스크립트 기준 형식 (예: 재무(내부)_2603.XLS)
+    xls_filename = f"재무(내부)_{FISCAL_YEAR[2:]}{period.zfill(2)}.XLS"
     print("  데이터 추출 중...")
-    df = download_all_at_once(session)
+    df = download_all_at_once(session, xls_filename)
     if df.empty:
         print("  [종료] 저장할 데이터가 없습니다.")
         return
