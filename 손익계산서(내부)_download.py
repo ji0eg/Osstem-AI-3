@@ -4,20 +4,14 @@
 # - IFRS순익계산서(내부용)
 # - 기간 시작/종료기간: 실행 시 입력받아 조회
 # - 기간/연도 /$PPF, /$PFFP: 자동 계산 (고정)
-# - 클립보드로 전체 데이터 추출 → 엑셀 파일 저장
+# - 스프레드시트([1,0]) XLS 파일 저장 후 엑셀로 변환
 # =====================================================
 
 import win32com.client          # SAP GUI를 파이썬으로 조작하는 도구
-import pyperclip                # 클립보드 복사/붙여넣기 도구
 import pandas as pd             # 표 데이터를 엑셀로 저장하는 도구
 import time                     # 대기 시간 도구
 import os                       # 폴더/파일 경로 도구
-import io                       # 문자열을 파일처럼 읽는 도구
 from datetime import date       # 오늘 날짜 도구
-from dotenv import load_dotenv  # .env 파일에서 설정 읽는 도구
-
-# .env 파일 로드
-load_dotenv()
 
 # -------------------------------------------------------
 # [설정] 여기서 원하는 값을 바꾸세요!
@@ -28,21 +22,16 @@ TODAY       = date.today()
 FISCAL_YEAR = str(TODAY.year)        # 당기 회계연도 (예: "2026")
 PRIOR_YEAR  = str(TODAY.year - 1)    # 전기 회계연도 (예: "2025")
 
-# 기간/연도 고정값
-# /$PPF  = 당기 회계연도 + "001"  (예: "2026001")
-# /$PFFP = 전기 회계연도 + "001"  (예: "2025001")
-PPF_VALUE  = FISCAL_YEAR + "001"     # 고정
-PFFP_VALUE = PRIOR_YEAR  + "001"     # 고정
+# 기간/연도 고정값 (SAP 녹화 기준)
+# ctxtPAR_07 = /$PPF  = 당기연도 + "001"  (예: "2026001")
+# ctxtPAR_06 = /$PFFP = 전기연도 + "001"  (예: "2025001")
+PPF_VALUE  = FISCAL_YEAR + "001"
+PFFP_VALUE = PRIOR_YEAR  + "001"
 
 # 결과 저장 폴더
 OUTPUT_DIR = "data/output"
 
-# 클립보드 내보내기 후 대기시간(초) — 컴퓨터가 느리면 늘리세요
-CLIPBOARD_WAIT = 3.0
-
-# -------------------------------------------------------
 # T코드
-# -------------------------------------------------------
 SAP_TCODE = "Y_OKD_27000039"
 
 
@@ -70,102 +59,137 @@ def navigate_to_tcode(session):
 
 
 # -------------------------------------------------------
-# 조회 조건 입력
+# 조회 조건 입력 (SAP 녹화 스크립트 기준)
 # -------------------------------------------------------
 def input_conditions(session, period_from, period_to):
     """
-    조회 조건 입력
-    - 회계연도: 자동 (올해)
-    - 기간 시작: 실행 시 입력받은 값
-    - 종료기간: 실행 시 입력받은 값
-    - 전기기간시작: 기간 시작과 동일
-    - 전기종료기간: 종료기간과 동일
-    - 기간/연도 /$PPF:  당기연도 + 001 (고정)
-    - 기간/연도 /$PFFP: 전기연도 + 001 (고정)
+    필드 ID 및 입력 순서 — SAP 녹화 스크립트 기준:
+    ctxtPAR_04: 기간 시작
+    ctxtPAR_05: 전기기간시작  (기간 시작과 동일)
+    ctxtPAR_02: 전기종료기간  (종료기간과 동일)
+    ctxtPAR_03: 종료기간
+    ctxtPAR_07: /$PPF  = 당기연도+001 (고정)
+    ctxtPAR_06: /$PFFP = 전기연도+001 (고정) → 마지막 입력 후 바로 F8
     """
-    # 회계연도 (예: "2026")
-    session.findById("wnd[0]/usr/ctxtPAR_01").text = FISCAL_YEAR
-
-    # 기간 시작 (사용자 입력)
+    # 기간 시작 — ctxtPAR_04
     session.findById("wnd[0]/usr/ctxtPAR_04").text = period_from
+    session.findById("wnd[0]/usr/ctxtPAR_04").setFocus()
+    session.findById("wnd[0]/usr/ctxtPAR_04").caretPosition = len(period_from)
+    session.findById("wnd[0]").sendVKey(0)
 
-    # 종료기간 (사용자 입력)
-    session.findById("wnd[0]/usr/ctxtPAR_03").text = period_to
-
-    # 전기기간시작 = 기간 시작과 동일
+    # 전기기간시작 — ctxtPAR_05 (기간 시작과 동일)
     session.findById("wnd[0]/usr/ctxtPAR_05").text = period_from
+    session.findById("wnd[0]/usr/ctxtPAR_05").caretPosition = len(period_from)
+    session.findById("wnd[0]").sendVKey(0)
 
-    # 전기종료기간 = 종료기간과 동일
+    # 전기종료기간 — ctxtPAR_02 (종료기간과 동일)
     session.findById("wnd[0]/usr/ctxtPAR_02").text = period_to
+    session.findById("wnd[0]/usr/ctxtPAR_02").caretPosition = len(period_to)
+    session.findById("wnd[0]").sendVKey(0)
 
-    # 기간/연도 /$PPF: 당기연도 + 001 (고정, 예: 2026001)
-    session.findById("wnd[0]/usr/ctxtPAR_06").text = PPF_VALUE
+    # 종료기간 — ctxtPAR_03
+    session.findById("wnd[0]/usr/ctxtPAR_03").text = period_to
+    session.findById("wnd[0]/usr/ctxtPAR_03").caretPosition = len(period_to)
+    session.findById("wnd[0]").sendVKey(0)
 
-    # 기간/연도 /$PFFP: 전기연도 + 001 (고정, 예: 2025001)
-    session.findById("wnd[0]/usr/ctxtPAR_07").text = PFFP_VALUE
+    # 기간/연도 /$PPF — ctxtPAR_07 (고정)
+    session.findById("wnd[0]/usr/ctxtPAR_07").text = PPF_VALUE
+    session.findById("wnd[0]/usr/ctxtPAR_07").caretPosition = len(PPF_VALUE)
+    session.findById("wnd[0]").sendVKey(0)
+
+    # 기간/연도 /$PFFP — ctxtPAR_06 (고정, 마지막 입력)
+    session.findById("wnd[0]/usr/ctxtPAR_06").text = PFFP_VALUE
+    session.findById("wnd[0]/usr/ctxtPAR_06").caretPosition = len(PFFP_VALUE)
+    # Enter 없이 F8로 바로 넘어감 (녹화 기준)
 
     time.sleep(0.3)
-    print(f"  [조건 입력] 회계연도={FISCAL_YEAR}, "
-          f"기간시작={period_from}월, 종료기간={period_to}월, "
+    print(f"  [조건 입력] 기간시작={period_from}월, 종료기간={period_to}월, "
           f"/$PPF={PPF_VALUE}, /$PFFP={PFFP_VALUE}")
 
 
 # -------------------------------------------------------
-# F8 실행 (조회)
+# F8 실행 (조회) + 팝업 처리
 # -------------------------------------------------------
 def execute_report(session):
-    """F8 키로 조회 실행"""
-    session.findById("wnd[0]").sendVKey(8)  # 8 = F8
-    time.sleep(3.0)  # 결과 화면 로딩 대기
+    """
+    F8 키로 조회 실행.
+    손익계산서는 F8 후 드릴다운 옵션 팝업이 뜸 → [0,0] 첫 번째 옵션 선택 후 OK
+    """
+    session.findById("wnd[0]").sendVKey(8)  # F8
+    time.sleep(2.0)
+
+    # F8 후 팝업 처리: 드릴다운 결과 선택 (radCEC01-CHOICE[0,0])
+    try:
+        session.findById(
+            "wnd[1]/usr/sub:SAPLKEC1:0110/radCEC01-CHOICE[0,0]"
+        ).select()
+        session.findById("wnd[1]/tbar[0]/btn[0]").press()
+        time.sleep(2.0)
+        print("  [팝업] 드릴다운 옵션 선택 완료")
+    except Exception:
+        time.sleep(1.0)  # 팝업 없으면 그냥 대기
+
     print("  [조회 완료] 결과 화면 로드됨")
 
 
 # -------------------------------------------------------
-# 전체 데이터 클립보드로 내보내기
+# 전체 데이터 한 번에 내보내기 (SAP 녹화 기준)
 # -------------------------------------------------------
-def download_all_at_once(session):
+def download_all_at_once(session, xls_filename):
     """
-    SAP 메뉴 '시스템 → 리스트 → 저장 → 로컬 파일'에서
-    클립보드(형식 [4,0]) 로 전체 데이터를 한 번에 추출합니다.
+    SAP 녹화 스크립트 기준:
+    스프레드시트([1,0]) 형식으로 XLS 파일 저장 후 파이썬으로 읽어옵니다.
+    SAP 스프레드시트 = UTF-16 LE 인코딩 탭 구분 텍스트 (.XLS 확장자)
     """
-    # ① 화면 최대화 (전체 데이터가 잘리지 않도록)
-    session.findById("wnd[0]").maximize()
-    time.sleep(0.5)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_dir   = os.path.abspath(OUTPUT_DIR)
+    temp_path = os.path.join(out_dir, xls_filename)
 
-    # ② 시스템 → 리스트 → 저장 → 로컬 파일 메뉴 클릭
+    # ① 시스템 → 리스트 → 저장 → 로컬 파일 메뉴 클릭
     print("  [메뉴] 시스템 → 리스트 → 저장 → 로컬 파일 클릭...")
     session.findById("wnd[0]/mbar/menu[6]/menu[5]/menu[2]/menu[2]").select()
     time.sleep(1.0)
 
-    # ③ 형식 선택 팝업: [4,0] 클립보드 선택
+    # ② 형식 선택: [1,0] 스프레드시트
+    radio = session.findById(
+        "wnd[1]/usr/subSUBSCREEN_STEPLOOP:SAPLSPO5:0150"
+        "/sub:SAPLSPO5:0150/radSPOPLI-SELFLAG[1,0]"
+    )
+    radio.select()
+    radio.setFocus()
+    session.findById("wnd[1]/tbar[0]/btn[0]").press()
+    time.sleep(0.8)
+
+    # ③ 파일명 입력 후 저장 (녹화 기준: wnd[1]에서 파일명만 입력)
+    session.findById("wnd[1]/usr/ctxtDY_PATH").text = out_dir + "\\"
+    session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = xls_filename
+    session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len(xls_filename)
+    session.findById("wnd[1]/tbar[0]/btn[0]").press()
+    time.sleep(2.0)
+
+    # 덮어쓰기 확인 팝업 처리 (파일이 이미 있을 때)
     try:
-        radio = session.findById(
-            "wnd[1]/usr/subSUBSCREEN_STEPLOOP:SAPLSPO5:0150"
-            "/sub:SAPLSPO5:0150/radSPOPLI-SELFLAG[4,0]"
-        )
-        radio.select()
-        radio.setFocus()
         session.findById("wnd[1]/tbar[0]/btn[0]").press()
         time.sleep(1.0)
-        print("  [형식 선택] 클립보드 완료")
-    except Exception as e:
-        raise RuntimeError(f"클립보드 형식 선택 실패: {e}")
+    except Exception:
+        pass
 
-    # ④ 클립보드 내용 읽기
-    time.sleep(CLIPBOARD_WAIT)
-    content = pyperclip.paste()
+    print(f"  [파일 저장] {temp_path}")
 
-    if not content or not content.strip():
-        print("  [주의] 클립보드가 비어있습니다.")
-        return pd.DataFrame()
-
-    # ⑤ 탭 구분 텍스트 → DataFrame (SAP 원본 형태 그대로 유지)
+    # ④ XLS 파일 읽기 (UTF-16 LE 탭 구분 텍스트)
     df = pd.read_csv(
-        io.StringIO(content),
+        temp_path,
         sep="\t",
+        encoding="utf-16",
         dtype=str,
-        header=None,
+        header=None,    # SAP 원본 형태(제목·메타데이터) 그대로 유지
     )
+
+    # ⑤ 임시 XLS 파일 삭제
+    try:
+        os.remove(temp_path)
+    except Exception:
+        pass
 
     df = df.fillna("").astype(str)
     print(f"  [내보내기 완료] {len(df):,}행 × {len(df.columns)}열")
@@ -251,7 +275,9 @@ def main():
         else:
             print("  [오류] 1~12 사이의 숫자를 입력하세요.")
 
-    output_file = os.path.join(
+    # 임시 XLS 파일명 (녹화 기준 형식: 손익(내부)_YYPP.XLS)
+    xls_filename = f"손익(내부)_{FISCAL_YEAR[2:]}{period_to.zfill(2)}.XLS"
+    output_file  = os.path.join(
         OUTPUT_DIR,
         f"Y_OKD_27000039_{FISCAL_YEAR}년{period_from}~{period_to}월.xlsx"
     )
@@ -277,14 +303,14 @@ def main():
     input_conditions(session, period_from, period_to)
     print()
 
-    # 4단계: 조회 실행 (F8)
+    # 4단계: 조회 실행 (F8) + 팝업 처리
     print("  조회 실행 중...")
     execute_report(session)
     print()
 
-    # 5단계: 전체 데이터 클립보드로 내보내기
+    # 5단계: 전체 데이터 XLS로 내보내기
     print("  데이터 추출 중...")
-    df = download_all_at_once(session)
+    df = download_all_at_once(session, xls_filename)
     if df.empty:
         print("  [종료] 저장할 데이터가 없습니다.")
         return
