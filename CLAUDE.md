@@ -14,6 +14,7 @@
 - GitHub 계정: ji0eg / 이메일: ji0eg@gmail.com
 
 ## 프로젝트 구조 (2026-04-17 기준)
+- `app.py` — Streamlit 웹 앱: 손익계산서 SAP 조회 → 결과 확인 → CSV/Excel 다운로드
 - `exchange_rate.py` — 한국은행 API에서 환율 수집 후 엑셀 저장
 - `module1_closing.py` — 월 마감 자동화 (ERP 데이터 검증 + 계정별 집계)
 - `module2_statement.py` — 분기 결산명세서 자동화 (전기 비교표 생성)
